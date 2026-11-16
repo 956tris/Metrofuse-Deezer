@@ -215,7 +215,7 @@ internal fun probeMedia(media: DeezerMedia, opener: MediaOpener): MediaLocation 
             opener.open(media, uri, "HEAD", null).use { response ->
                 val size = response.length
                 if (response.status in 200..299 && size != null &&
-                    size in 1..MAX_MEDIA_BYTES
+                    size in 1..MAX_MEDIA_BYTES && (media.contentLength == null || media.contentLength == size)
                 ) {
                     return MediaLocation(uri, size)
                 }
@@ -223,7 +223,7 @@ internal fun probeMedia(media: DeezerMedia, opener: MediaOpener): MediaLocation 
             opener.open(media, uri, "GET", ByteRange(0, 0)).use { response ->
                 val size = response.contentRange?.substringAfterLast('/')?.toLongOrNull()
                 if (response.status == 206 && size != null &&
-                    size in 1..MAX_MEDIA_BYTES
+                    size in 1..MAX_MEDIA_BYTES && (media.contentLength == null || media.contentLength == size)
                 ) {
                     return MediaLocation(uri, size)
                 }

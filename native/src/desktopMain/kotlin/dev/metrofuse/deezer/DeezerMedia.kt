@@ -40,8 +40,10 @@ internal data class StreamingSettings(
 
 internal fun dzmediaServer(value: String): URI {
     if (value.isBlank()) throw DeezerFailure("DZMEDIA_URL_REQUIRED")
+    val address = value.trim().trimEnd('/')
+    val absolute = if ("://" in address) address else "https://$address"
     val root =
-        runCatching { URI(value.trim().trimEnd('/')) }.getOrNull()
+        runCatching { URI(absolute).normalize() }.getOrNull()
             ?: throw DeezerFailure("INVALID_DZMEDIA_URL")
     if (root.host.isNullOrBlank() || root.userInfo != null || root.rawQuery != null ||
         root.fragment != null ||
@@ -88,7 +90,8 @@ internal class DeezerMedia(
     val cipher: String,
     val sources: List<URI>,
     val expiresAt: Long,
-    val server: URI? = null
+    val server: URI? = null,
+    val contentLength: Long? = null
 ) {
     val mimeType: String get() = if (format == "FLAC") "audio/flac" else "audio/mpeg"
     val codec: String get() = if (format == "FLAC") "flac" else "mp3"
@@ -129,7 +132,7 @@ internal object DeezerMediaParser {
                 ) {
                     throw DeezerFailure("UNSUPPORTED_CIPHER")
                 }
-                val sources = entry.list("sources").map { source ->
+                val directSources = entry.list("sources").map { source ->
                     val uri =
                         source.text("url")?.let(::httpsUri)
                             ?: throw DeezerFailure("UNSAFE_MEDIA_URL")
@@ -138,26 +141,27 @@ internal object DeezerMediaParser {
                     ) {
                         throw DeezerFailure("UNSAFE_MEDIA_URL")
                     }
-                    if (server ==
-                        null
-                    ) {
-                        uri
-                    } else {
+                    uri
+                }.distinct()
+                val sources = if (server == null) directSources else {
+                    directSources.map { uri ->
                         URI(
                             server.toString() + "/deezer-media-proxy?url=" +
                                 uri.toASCIIString().encodeURLParameter()
                         )
-                    }
+                    } + directSources
                 }
                 if (sources.isEmpty()) continue
                 val expiries =
                     listOfNotNull(
-                        epochMillis(entry.text("expiration", "expires_at", "expiry")),
-                        epochMillis(data.text("expiration", "expires_at"))
+                        epochMillis(entry.text("exp", "expiration", "expires_at", "expiry")),
+                        epochMillis(data.text("exp", "expiration", "expires_at"))
                     )
                 val expiresAt = minOf(expiries.minOrNull() ?: (now + 5 * 60_000), now + 30 * 60_000)
                 if (expiresAt <= now + 5000) throw DeezerFailure("MEDIA_EXPIRED", retryable = true)
-                return DeezerMedia(trackId, format, cipher, sources, expiresAt, server)
+                val size = entry.text("filesize", "file_size")?.toLongOrNull()
+                if (size != null && size !in 1..MAX_MEDIA_BYTES) throw DeezerFailure("INVALID_MEDIA_SIZE")
+                return DeezerMedia(trackId, format, cipher, sources, expiresAt, server, size)
             }
         }
         throw DeezerFailure("QUALITY_UNAVAILABLE")

@@ -5,3 +5,5 @@
 dist/
 local.properties
 *.log
+.ci/
+__pycache__/

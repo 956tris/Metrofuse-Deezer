@@ -41,16 +41,24 @@ kotlin {
 val compilation = kotlin.targets["desktop"].compilations["main"]
 val manifestSource = layout.projectDirectory.file("manifest.json")
 val manifestFile = layout.buildDirectory.file("plugin-manifest/manifest.json")
+val pluginVersion = providers.gradleProperty("pluginVersion").orElse(providers.provider {
+    requireNotNull(Regex("\"version\"\\s*:\\s*\"([^\"]+)\"").find(manifestSource.asFile.readText())).groupValues[1]
+})
 val generatePluginManifest = tasks.register("generatePluginManifest") {
     val composeAbi = "kotlin-${libs.versions.kotlin.get()}_compose-${libs.versions.compose.get()}_api-1.1.0"
     inputs.file(manifestSource)
     inputs.property("composeAbi", composeAbi)
+    inputs.property("pluginVersion", pluginVersion)
     outputs.file(manifestFile)
     doLast {
         val output = manifestFile.get().asFile
         output.parentFile.mkdirs()
+        val version = pluginVersion.get()
+        require(version.matches(Regex("[0-9]+\\.[0-9]+\\.[0-9]+"))) { "Use a stable semantic pluginVersion" }
         output.writeText(
-            manifestSource.asFile.readText().replaceFirst(
+            manifestSource.asFile.readText()
+                .replace(Regex("\"version\"\\s*:\\s*\"[^\"]+\""), "\"version\": \"$version\"")
+                .replaceFirst(
                 "{",
                 "{\n  \"composeAbi\": \"$composeAbi\","
             )
@@ -58,8 +66,24 @@ val generatePluginManifest = tasks.register("generatePluginManifest") {
     }
 }
 
+val desktopBrowser = layout.buildDirectory.dir("plugin-browser")
+val prepareDesktopBrowser = tasks.register<Sync>("prepareDesktopBrowser") {
+    inputs.file(hostSdkJar)
+    into(desktopBrowser)
+    from({ zipTree(hostSdkJar.get()) }) {
+        include("metrofuse-sdk/windows/metrofuse-browser.exe")
+        eachFile { path = "assets/windows/deezer-browser.exe" }
+        includeEmptyDirs = false
+    }
+    doLast {
+        check(desktopBrowser.get().file("assets/windows/deezer-browser.exe").asFile.isFile) {
+            "The matching MetroFuse SDK must contain its Windows browser helper"
+        }
+    }
+}
+
 tasks.register<Jar>("packagePluginJar") {
-    dependsOn("desktopMainClasses", generatePluginManifest)
+    dependsOn("desktopMainClasses", generatePluginManifest, prepareDesktopBrowser)
     archiveFileName.set("deezer.jar")
     destinationDirectory.set(layout.buildDirectory.dir("outputs/plugins"))
     isPreserveFileTimestamps = false
@@ -69,6 +93,7 @@ tasks.register<Jar>("packagePluginJar") {
     from(rootProject.file("LICENSE"))
     from(layout.projectDirectory.file("SOURCE"))
     from(layout.projectDirectory.dir("assets")) { into("assets") }
+    from(desktopBrowser)
 }
 
 val preparedAndroid = layout.buildDirectory.dir("plugin-apk/input")

@@ -1,0 +1,139 @@
+name: Build and release Deezer
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deezer-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Select this commit's release version
+        id: version
+        run: python3 tooling/ci-version.py
+      - name: Check out the matching MetroFuse API and SDK
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: 956tris/MetroFuse
+          ref: 8d62892c04be53e84956390f5dee1f90bf082706
+          path: .ci/metrofuse
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
+        with:
+          packages: platform-tools
+      - name: Install Android packaging tools
+        run: sdkmanager "platforms;android-37.0" "platforms;android-37.1" "build-tools;37.0.0"
+      - name: Cross-build the SDK's Windows sign-in browser
+        run: |
+          dotnet publish .ci/metrofuse/plugin-sdk/windows-webview/Browser.csproj \
+            -c Release -r win-x64 --self-contained true \
+            -o .ci/metrofuse/plugin-sdk/build/generated/browser-resources/metrofuse-sdk/windows \
+            /p:EnableWindowsTargeting=true /p:PublishSingleFile=true \
+            /p:IncludeNativeLibrariesForSelfExtract=true /p:DebugType=None /p:DebugSymbols=false
+      - name: Export API and SDK libraries in the isolated runner checkout
+        working-directory: .ci/metrofuse
+        run: bash ./gradlew :plugin-api:desktopJar :plugin-sdk:desktopJar --no-daemon --max-workers=2 --no-configuration-cache
+      - name: Build the Deezer extension
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          bash ./gradlew :native:packagePluginJar :native:packagePluginApk \
+            "-PmetrofuseApiJar=$GITHUB_WORKSPACE/.ci/metrofuse/plugin-api/build/libs/plugin-api-desktop-1.1.0.jar" \
+            "-PmetrofuseSdkJar=$GITHUB_WORKSPACE/.ci/metrofuse/plugin-sdk/build/libs/plugin-sdk-desktop-1.1.0.jar" \
+            "-PpluginVersion=$RELEASE_VERSION" \
+            --no-daemon --max-workers=2 --no-configuration-cache
+          python3 tooling/package-release.py --version "$RELEASE_VERSION"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: deezer-${{ github.sha }}
+          path: |
+            dist/deezer.jar
+            dist/deezer.apk
+            dist/SHA256SUMS
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 14
+
+  release:
+    needs: build
+    if: github.repository_owner == '956tris'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: deezer-${{ github.sha }}
+          path: dist
+      - name: Verify the release packages
+        env:
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          (cd dist && sha256sum --strict --check SHA256SUMS)
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from zipfile import ZipFile
+          for name, location in (
+              ('deezer.jar', 'manifest.json'),
+              ('deezer.apk', 'assets/metrofuse/manifest.json'),
+          ):
+              with ZipFile(Path('dist') / name) as archive:
+                  manifest = json.loads(archive.read(location))
+                  if manifest['id'] != 'metrofuse.deezer' or manifest['version'] != os.environ['RELEASE_VERSION']:
+                      raise SystemExit(f'Unexpected package: {name}')
+          PY
+      - name: Publish a release for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          tag="v$RELEASE_VERSION"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft > "$RUNNER_TEMP/deezer-release-draft"; then
+            if [[ "$(cat "$RUNNER_TEMP/deezer-release-draft")" != 'true' ]]; then
+              echo "Release $tag is already published; preserving its files."
+              exit 0
+            fi
+          else
+            cat > "$RUNNER_TEMP/deezer-release-notes.md" <<EOF
+          Import deezer.jar on desktop or deezer.apk on Android through MetroFuse Plugins.
+
+          Includes Deezer browser sign-in, Home and library, account and dzmedia streaming, and streaming-source and quality dropdowns. Dzmedia accepts a hostname, base URL or full /get_url endpoint; its optional relay falls back to the Deezer CDN. The Windows sign-in browser is included in the desktop plugin.
+
+          Built from https://github.com/$GITHUB_REPOSITORY/commit/$GITHUB_SHA by https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID. Requires MetroFuse API 1.1.0 and its matching plugin SDK. Device and account testing is left to the user.
+          EOF
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title "Deezer $RELEASE_VERSION" --draft --notes-file "$RUNNER_TEMP/deezer-release-notes.md"
+          fi
+          gh release upload "$tag" --repo "$GITHUB_REPOSITORY" \
+            dist/deezer.jar dist/deezer.apk dist/SHA256SUMS --clobber
+          head=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+          latest=false
+          if [[ "$head" == "$GITHUB_SHA" ]]; then latest=true; fi
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest="$latest"

@@ -12,9 +12,7 @@
   "description": "Deezer browser sign-in, personalized Home, account library, search, lyrics and full account or dzmedia streaming.",
   "settings": [
     {"key": "audioEnabled", "title": "Enable Deezer streaming", "type": "BOOLEAN", "default": true},
-    {"key": "streamingMode", "title": "Streaming source", "type": "ENUM", "default": "ACCOUNT", "options": ["ACCOUNT", "DZMEDIA"]},
-    {"key": "dzmediaUrl", "title": "Dzmedia server URL", "type": "STRING", "default": ""},
-    {"key": "dzmediaProxy", "title": "Route media through the dzmedia server", "type": "BOOLEAN", "default": false},
-    {"key": "audioQuality", "title": "Preferred Deezer quality", "type": "ENUM", "default": "AUTO", "options": ["AUTO", "MP3_128", "MP3_320", "FLAC"]}
+    {"key": "dzmediaUrl", "title": "Dzmedia server URL", "type": "STRING", "default": "https://lufts-dzmedia.fly.dev/get_url"},
+    {"key": "dzmediaProxy", "title": "Prefer the dzmedia server relay (falls back to Deezer CDN)", "type": "BOOLEAN", "default": false}
   ]
 }

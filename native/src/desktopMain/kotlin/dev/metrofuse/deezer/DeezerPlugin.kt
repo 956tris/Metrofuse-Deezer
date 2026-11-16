@@ -12,9 +12,6 @@ import dev.metrofuse.api.NativePlugin
 import dev.metrofuse.api.PluginContext
 import dev.metrofuse.api.WebLoginPlugin
 import dev.metrofuse.api.WebLoginRequest
-import dev.metrofuse.sdk.WebViewLabels
-import dev.metrofuse.sdk.WebViewLoginScreen
-import dev.metrofuse.sdk.WebViewLoginUi
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -34,7 +31,7 @@ class DeezerPlugin :
     private var buffer: DeezerBuffer? = null
     private var catalog: DeezerCatalog? = null
     private var request: LoginRequest? = null
-    private var accountUi: WebViewLoginScreen? = null
+    private var accountUi: DeezerLoginScreen? = null
     private var settingsObserver: Job? = null
     private val accounts = DeezerAccounts(invalidateStreams = ::invalidateStreams)
     override val loginState get() = accounts.loginState
@@ -67,20 +64,9 @@ class DeezerPlugin :
                 listOf(LoginField("cookie", strings.getValue("session"))),
                 strings.getValue("instructions")
             )
-        accountUi = WebViewLoginScreen(
-            WebViewLoginUi(
-                browserRequest(),
-                WebViewLabels(
-                    title = strings.getValue("title"),
-                    hint = strings.getValue("instructions"),
-                    error = strings.getValue("error"),
-                    retry = strings.getValue("retry"),
-                    cancel = strings.getValue("cancel"),
-                    login = strings.getValue("login"),
-                    logout = strings.getValue("logout")
-                )
-            )
-        )
+        accountUi = DeezerLoginScreen(browserRequest(), strings, context.resources)
+        val streamingSettings = DeezerStreamingPreferences.create(context)
+        context.registerUi("settings.deezer", DeezerSettingsScreen(streamingSettings, strings))
         val client = createDeezerHttp().also { http = it }
         val mediaOpener = DeezerCdn().also { cdn = it }
         val mediaProxy = DeezerProxy(context.scope, mediaOpener).also { proxy = it }
@@ -92,16 +78,16 @@ class DeezerPlugin :
         context.registerLyricsProvider(provider)
         context.registerAudioSource(
             DeezerAudio(
-                context.settings,
+                streamingSettings,
                 DeezerMediaResolver(client, accounts),
                 mediaOpener,
                 mediaProxy,
                 mediaBuffer
             )
         )
-        var previous = StreamingSettings.from(context.settings.values.value)
+        var previous = StreamingSettings.from(streamingSettings.values.value)
         settingsObserver = context.scope.launch {
-            context.settings.values.collect { values ->
+            streamingSettings.values.collect { values ->
                 val current = StreamingSettings.from(values)
                 if (previous != current) invalidateStreams()
                 previous = current
@@ -139,7 +125,7 @@ class DeezerPlugin :
         requiredCookies = listOf("arl"),
         allowedHosts = listOf(
             "www.deezer.com", "deezer.com", "auth.deezer.com", "connect.deezer.com", "consent.deezer.com",
-            "accounts.google.com", "accounts.google.co.uk", "www.google.com", "facebook.com", "www.facebook.com", "m.facebook.com", "appleid.apple.com"
+            "accounts.google.com", "www.google.com", "facebook.com", "www.facebook.com", "appleid.apple.com"
         )
     )
 }
