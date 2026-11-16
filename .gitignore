@@ -1,0 +1,7 @@
+.gradle/
+.kotlin/
+.host-libs/
+**/build/
+dist/
+local.properties
+*.log

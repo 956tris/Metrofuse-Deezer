@@ -1,0 +1,15 @@
+{
+  "session": "Deezer session",
+  "instructions": "Sign in to Deezer in the browser. MetroFuse verifies your account and stores the accepted session encrypted on supported devices. Full account streaming requires the matching Deezer subscription.",
+  "title": "Deezer",
+  "error": "Could not sign in to Deezer. Please try again.",
+  "retry": "Try again",
+  "cancel": "Cancel",
+  "login": "Sign in",
+  "logout": "Sign out",
+  "chartTracks": "Top tracks",
+  "chartAlbums": "Popular albums",
+  "chartArtists": "Popular artists",
+  "chartPlaylists": "Featured playlists",
+  "flow": "Flow"
+}

@@ -1,0 +1,15 @@
+MetroFuse Deezer provider, GPL-3.0-or-later.
+
+This separate provider targets MetroFuse API 1.1.0 and the matching plugin SDK.
+Build and account-screen patterns follow the MetroFuse YouTube Music reference:
+https://github.com/956tris/MetroFuse-YouTube-Music
+
+Deezer gateway request and media response shapes were inspected in deezer-py
+1.3.7 and the user's dzmedia-metrofuse Rust service. This plugin implements its
+own Kotlin session, catalog, Home, library and range-streaming logic. It does
+not bundle or run dzmedia, deezer-py or another provider's account credentials.
+
+All fixture identities, tokens and audio bytes are synthetic. Signed URLs,
+account cookies and license tokens are kept in memory and never logged or
+written to plugin settings or ordinary storage. Browser session persistence
+belongs to the host's encrypted credential store.

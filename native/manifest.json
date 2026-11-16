@@ -1,0 +1,20 @@
+{
+  "id": "metrofuse.deezer",
+  "name": "Deezer",
+  "version": "1.0.0",
+  "author": "MetroFuse contributors",
+  "runtime": "kotlin",
+  "api": "1.1.0",
+  "platforms": ["desktop", "android"],
+  "entryClass": "dev.metrofuse.deezer.DeezerPlugin",
+  "capabilities": ["audio", "search", "catalog", "metadata", "lyrics", "settings", "login", "home"],
+  "home": {"title": "Deezer"},
+  "description": "Deezer browser sign-in, personalized Home, account library, search, lyrics and full account or dzmedia streaming.",
+  "settings": [
+    {"key": "audioEnabled", "title": "Enable Deezer streaming", "type": "BOOLEAN", "default": true},
+    {"key": "streamingMode", "title": "Streaming source", "type": "ENUM", "default": "ACCOUNT", "options": ["ACCOUNT", "DZMEDIA"]},
+    {"key": "dzmediaUrl", "title": "Dzmedia server URL", "type": "STRING", "default": ""},
+    {"key": "dzmediaProxy", "title": "Route media through the dzmedia server", "type": "BOOLEAN", "default": false},
+    {"key": "audioQuality", "title": "Preferred Deezer quality", "type": "ENUM", "default": "AUTO", "options": ["AUTO", "MP3_128", "MP3_320", "FLAC"]}
+  ]
+}

@@ -1,0 +1,49 @@
+# Metrofuse Deezer
+
+A separate Deezer provider for MetroFuse on Windows desktop and Android. Install the JAR or APK inside MetroFuse's Plugins screen, enable it, and select Deezer as the music source. The plugin uses the existing host API and does not require changes to the MetroFuse application.
+
+## Features
+
+- Deezer browser sign-in, verified account identity, session restoration and logout.
+- Personalized Home and Flow when signed in, with public charts for guest browsing.
+- Account library with paginated favorite tracks, albums, artists and playlists, including private playlists.
+- Search for tracks, albums, artists and playlists; album, artist and playlist navigation.
+- Like and unlike songs, metadata, synchronized or plain lyrics when supplied by Deezer, and artist radio.
+- Full-track streaming through the signed-in Deezer account or a configurable dzmedia server.
+- MP3 at 128 or 320 kbps and FLAC when available, BF_CBC_STRIPE decoding, desktop byte-range seeking, signed-URL renewal and alternate-CDN selection.
+
+## Install and sign in
+
+Download `deezer.jar` for desktop or `deezer.apk` for Android from Releases. Import it through MetroFuse's Plugins screen; the APK is a plugin container, not a separate Android application. Enable Deezer, select its Home source and use the account button to sign in directly on Deezer's website.
+
+Use a MetroFuse host with API 1.1.0, its plugin SDK and the native ABI `kotlin-2.4.21_compose-1.13.0-beta02_api-1.1.0`. The host supplies WebView sign-in, Kotlin, Compose, coroutines, serialization and Ktor. Accepted sessions use the host's encrypted credential store where supported. The plugin does not store cookies or license tokens in ordinary settings or files.
+
+## Streaming settings
+
+`ACCOUNT` is the default streaming source. Sign in to Deezer and use a subscription that permits the requested quality. The plugin obtains a track token and the account's license token and requests `FULL` media from Deezer. Playback errors are returned when the service does not grant full-track access.
+
+To use dzmedia, change **Streaming source** to `DZMEDIA` and enter your server's HTTPS base URL in **Dzmedia server URL**. A base path is supported, for example `https://your-server.example/deezer`; the plugin posts to `/get_url` beneath that path. The request contains the Deezer track ID and requested formats. It is compatible with the dzmedia-metrofuse resolver's `formats`, `ids` and `fast` request contract and Deezer's media response format. No server address is bundled.
+
+Enable **Route media through the dzmedia server** to fetch the encrypted bytes through the server's `/deezer-media-proxy` endpoint. The plugin performs the decoding. Your signed-in Deezer account supplies your library and Home; dzmedia uses the streaming account configured on that server. Account cookies and license tokens are never sent to dzmedia. Plain HTTP is accepted only for a development server at `127.0.0.1`.
+
+**Preferred Deezer quality** selects automatic MP3, MP3 128, MP3 320 or FLAC. A FLAC preference can fall back to MP3 when the service only grants MP3; a strict lossless request from the host requires FLAC. Low-quality requests select MP3 128.
+
+Desktop streams decoded bytes as they arrive through a private loopback endpoint and supports arbitrary byte ranges for seeking. Android buffers the current decoded track into the application's temporary directory before returning a seekable file. This works with the host's existing cleartext-network restrictions. Android startup therefore depends on download speed and the host's audio-resolution deadline. Buffers and stream handles are cleared on account changes, logout, settings changes and plugin stop.
+
+## Build
+
+Use Java 25 and the included Gradle 9.8.2 wrapper. Provide the matching, already-built MetroFuse API and plugin SDK JARs. The extension build does not build or modify the host. Android packaging additionally needs build tools `37.0.0` and platform `android-37.0`, selected through `ANDROID_HOME`, `ANDROID_SDK_ROOT` or an untracked `local.properties` file.
+
+```powershell
+./gradlew.bat :native:packagePluginJar :native:packagePluginApk `
+  "-PmetrofuseApiJar=C:\path\plugin-api-desktop-1.1.0.jar" `
+  "-PmetrofuseSdkJar=C:\path\plugin-sdk-desktop-1.1.0.jar" `
+  --no-daemon --max-workers=1 --no-configuration-cache
+python tooling/package-release.py
+```
+
+Native outputs are in `native/build/outputs/plugins/`. Release files and `SHA256SUMS` are copied to `dist/`. Host API/SDK classes and host libraries are compile-only and excluded from the plugin artifacts. The build does not run account or device checks. Validate browser sign-in, personalized content, your dzmedia deployment and actual playback on your devices before relying on them.
+
+## License
+
+GPL-3.0-or-later. See [LICENSE](LICENSE) and [SOURCE](native/SOURCE). Build and login-screen integration follow the MetroFuse YouTube Music reference. Gateway and media request shapes were inspected in deezer-py 1.3.7 and dzmedia-metrofuse. No dzmedia server or shared account credentials are included.
