@@ -62,11 +62,20 @@ internal class DeezerAudio(
                     codec = media.codec,
                     bitrate = media.bitrate,
                     contentLength = location.length,
+                    sampleRate = location.flac?.sampleRate,
+                    durationSeconds = location.flac?.durationSeconds,
                     expiresAtMillis = media.expiresAt - 30_000,
-                    attributes = mapOf(
-                        "deezer.format" to media.format,
-                        "deezer.source" to snapshot.mode
-                    )
+                    attributes = buildMap {
+                        put("deezer.format", media.format)
+                        put("deezer.source", if (media.format == "MP3_MISC") "ACCOUNT" else snapshot.mode)
+                        if (media.format == "MP3_MISC") put("deezer.uploaded", "true")
+                        put("deezer.lossless", media.lossless.toString())
+                        location.flac?.let {
+                            put("deezer.bitDepth", it.bitDepth.toString())
+                            put("deezer.sampleRate", it.sampleRate.toString())
+                            put("deezer.channels", it.channels.toString())
+                        }
+                    }
                 )
             )
         } catch (failure: CancellationException) {

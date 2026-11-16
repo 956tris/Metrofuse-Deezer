@@ -16,6 +16,14 @@ Deezer gateway request and media response shapes were inspected in deezer-py
 own Kotlin session, catalog, Home, library and range-streaming logic. It does
 not bundle or run dzmedia, deezer-py or another provider's account credentials.
 
+Library, playlist, Home, account media and FLAC_24 request contracts were also
+compared with LuftVerbot's Echo Deezer extension at commit
+d67083dc5c7cc4ca939f17d659ed350d3199bb3d:
+https://github.com/LuftVerbot/echo-deezer-extension/tree/d67083dc5c7cc4ca939f17d659ed350d3199bb3d
+No Echo runtime or source files are bundled. Live endpoint verification and
+the supported music-library scope are documented in docs/endpoints.md in this
+plugin's source repository.
+
 All fixture identities, tokens and audio bytes are synthetic. Signed URLs,
 account cookies and license tokens are kept in memory and never logged or
 written to plugin settings or ordinary storage. Browser session persistence

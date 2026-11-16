@@ -38,21 +38,28 @@ internal fun JsonObject.list(vararg keys: String): List<JsonObject> = keys.first
     }
 }.orEmpty()
 
+internal fun JsonObject.entity(): JsonObject = (this["DATA"] as? JsonObject)
+    ?: (this["data"] as? JsonObject) ?: this
+
 internal fun deezerId(value: String?, prefix: String = ""): String? = value?.removePrefix(prefix)?.takeIf {
     it.matches(Regex("[1-9][0-9]{0,18}")) &&
         it.toLongOrNull() != null
 }
 
+internal fun deezerTrackId(value: String?, prefix: String = ""): String? = value?.removePrefix(prefix)?.takeIf {
+    it.matches(Regex("-?[1-9][0-9]{0,18}")) && it.toLongOrNull() != null
+}
+
 internal fun trackId(identity: TrackIdentity): String? {
     val owner = identity.identifiers["pluginOwner"] ?: identity.identifiers["plugin"]
     if (owner != null && owner != OWNER) return null
-    return deezerId(identity.identifiers["deezer"])
+    return deezerTrackId(identity.identifiers["deezer"])
         ?: identity.canonicalId.takeIf {
             it.startsWith(TRACK_PREFIX)
-        }?.let { deezerId(it, TRACK_PREFIX) }
+        }?.let { deezerTrackId(it, TRACK_PREFIX) }
         ?: identity.identifiers["providerTrackId"]?.takeIf {
             owner == OWNER
-        }?.let { deezerId(it, TRACK_PREFIX) }
+        }?.let { deezerTrackId(it, TRACK_PREFIX) }
 }
 
 internal fun httpsUri(value: String): URI? = runCatching { URI(value) }.getOrNull()?.takeIf {
@@ -78,7 +85,7 @@ internal object DeezerModels {
     }
 
     fun track(value: JsonObject, liked: Boolean = false): Track? {
-        val id = deezerId(value.text("SNG_ID", "id")) ?: return null
+        val id = deezerTrackId(value.text("SNG_ID", "id")) ?: return null
         val title = value.text("SNG_TITLE", "title", "title_short") ?: return null
         val version = value.text("VERSION", "title_version")
         val artists = value.list("ARTISTS").mapNotNull { it.text("ART_NAME", "name") }.distinct()
@@ -97,6 +104,9 @@ internal object DeezerModels {
             artistId?.let { put("artistId", ARTIST_PREFIX + it) }
             value.text("ISRC", "isrc")?.let { put("isrc", it) }
             if (liked) put("likeStatus", "LIKE")
+            if (id.startsWith("-") || value.text("FILESIZE_MP3_MISC")?.toLongOrNull()?.let { it > 0 } == true) {
+                put("deezer.uploaded", "true")
+            }
             value.text("EXPLICIT_LYRICS", "explicit_lyrics")?.let { put("explicit", it) }
         }
         return Track(
@@ -130,7 +140,8 @@ internal object DeezerModels {
         return CatalogAlbum(
             id = ALBUM_PREFIX + id,
             title = title,
-            artist = value.text("ART_NAME") ?: value.obj("artist").text("name").orEmpty(),
+            artist = value.text("ART_NAME") ?: value.obj("artist").text("name")
+                ?: value.list("ARTISTS").mapNotNull { it.text("ART_NAME", "name") }.distinct().joinToString(", "),
             artwork = artwork(
                 value,
                 "cover",
@@ -184,7 +195,7 @@ internal object DeezerModels {
                     ?: accountName,
             artwork = artwork(
                 value,
-                "playlist",
+                value.text("PICTURE_TYPE")?.takeIf { it in setOf("playlist", "cover", "artist", "user") } ?: "playlist",
                 "picture_xl",
                 "picture_big",
                 "picture_medium",

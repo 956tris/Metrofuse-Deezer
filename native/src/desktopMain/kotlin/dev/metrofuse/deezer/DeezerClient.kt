@@ -68,6 +68,7 @@ internal suspend fun HttpResponse.jsonValue(): JsonElement {
             when (status) {
                 HttpStatusCode.Unauthorized -> "SESSION_EXPIRED"
                 HttpStatusCode.Forbidden -> "ACCESS_DENIED"
+                HttpStatusCode.BadRequest -> "INVALID_REQUEST"
                 HttpStatusCode.NotFound -> "NOT_FOUND"
                 HttpStatusCode.TooManyRequests -> "RATE_LIMITED"
                 else -> "HTTP_ERROR"

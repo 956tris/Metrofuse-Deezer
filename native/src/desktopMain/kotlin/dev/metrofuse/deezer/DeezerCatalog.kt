@@ -27,6 +27,7 @@ import dev.metrofuse.api.TrackVote
 import io.ktor.client.HttpClient
 import io.ktor.http.encodeURLParameter
 import java.net.URI
+import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -131,19 +132,23 @@ internal class DeezerCatalog(
             accounts.withSession { session ->
                 val root =
                     session.call(
-                        "playlist.getData",
+                        "deezer.pagePlaylist",
                         buildJsonObject {
-                            put("PLAYLIST_ID", playlistId)
+                            put("playlist_id", playlistId)
+                            put("start", 0)
+                            put("nb", PAGE_SIZE)
+                            put("tags", true)
+                            put("lang", Locale.getDefault().toLanguageTag())
                         }
                     ) as? JsonObject
                         ?: throw DeezerFailure("INVALID_RESPONSE")
                 val playlist =
-                    DeezerModels.playlist(root, accountName = session.accountName)
+                    DeezerModels.playlist(root.entity(), accountName = session.accountName)
                         ?: return@withSession null
                 val tracks = mutableListOf<Track>()
                 var index = 0
                 while (true) {
-                    val page = session.call(
+                    val page = if (index == 0 && root["SONGS"] is JsonObject) root.obj("SONGS") else session.call(
                         "playlist.getSongs",
                         buildJsonObject {
                             put("PLAYLIST_ID", playlistId)
@@ -187,8 +192,8 @@ internal class DeezerCatalog(
                 val uri =
                     runCatching { URI(it) }.getOrNull()
                         ?: throw DeezerFailure("INVALID_CONTINUATION")
-                if (uri.scheme != "https" || uri.host != "api.deezer.com" || uri.userInfo != null ||
-                    uri.port !in setOf(-1, 443) ||
+                if (uri.scheme !in setOf("https", "http") || uri.host != "api.deezer.com" || uri.userInfo != null ||
+                    (uri.port != -1 && uri.port != if (uri.scheme == "https") 443 else 80) ||
                     uri.path != path ||
                     uri.fragment != null
                 ) {
@@ -328,57 +333,46 @@ internal class DeezerCatalog(
                     categories.size
                 )
             val category = categories[cursor.category]
+            val pageSize = if (category == "tracks") PAGE_SIZE else PROFILE_PAGE_SIZE
             val page: JsonObject
             val items: List<HomeItem>
             if (category == "tracks") {
                 page = session.call(
-                    "song.getFavoriteIds",
+                    "favorite_song.getList",
                     buildJsonObject {
+                        put("user_id", session.userId)
+                        put("tab", "loved")
                         put("start", cursor.index)
-                        put("nb", PAGE_SIZE)
+                        put("nb", pageSize)
                     }
                 ) as? JsonObject ?: throw DeezerFailure("INVALID_RESPONSE")
-                val ids = requireData(page).mapNotNull { deezerId(it.text("SNG_ID", "id")) }
-                val tracks = if (ids.isEmpty()) {
-                    emptyList()
-                } else {
-                    val songs =
-                        session.call(
-                            "song.getListData",
-                            buildJsonObject {
-                                put("SNG_IDS", JsonArray(ids.map(::JsonPrimitive)))
-                            }
-                        ) as? JsonObject
-                            ?: throw DeezerFailure("INVALID_RESPONSE")
-                    val byId = requireData(songs).associateBy { it.text("SNG_ID", "id") }
-                    ids.mapNotNull {
-                        byId[it]?.let { value -> DeezerModels.track(value, liked = true) }
-                    }
-                }
+                val tracks = requireData(page).mapNotNull { DeezerModels.track(it.entity(), liked = true) }
                 items = tracks.map { HomeItem(track = it) }
             } else {
                 val profile = session.call(
                     "deezer.pageProfile",
                     buildJsonObject {
-                        put("USER_ID", session.userId)
+                        put("user_id", session.userId)
                         put("tab", category)
                         put("start", cursor.index)
-                        put("nb", PAGE_SIZE)
+                        put("nb", pageSize)
+                        put("lang", request.language)
                     }
-                ) as? JsonObject ?: throw DeezerFailure("INVALID_RESPONSE")
+                ) as? JsonObject ?: throw DeezerFailure("LIBRARY_UNAVAILABLE")
                 page =
                     profile.obj("TAB")[category] as? JsonObject
                         ?: throw DeezerFailure("INVALID_RESPONSE")
-                items = requireData(page).mapNotNull {
+                items = requireData(page).mapNotNull { entry ->
+                    val value = entry.entity()
                     when (category) {
-                        "albums" -> DeezerModels.album(it)?.let { album -> HomeItem(album = album) }
+                        "albums" -> DeezerModels.album(value)?.let { album -> HomeItem(album = album) }
 
-                        "artists" -> DeezerModels.artist(it)?.let { artist ->
+                        "artists" -> DeezerModels.artist(value)?.let { artist ->
                             HomeItem(artist = artist)
                         }
 
                         else -> DeezerModels.playlist(
-                            it,
+                            value,
                             accountName = session.accountName
                         )?.let { playlist ->
                             HomeItem(playlist = playlist)
@@ -389,13 +383,13 @@ internal class DeezerCatalog(
             val count = requireData(page).size
             val first = requireData(
                 page
-            ).firstOrNull()?.text("SNG_ID", "ALB_ID", "ART_ID", "PLAYLIST_ID", "id")
+            ).firstOrNull()?.entity()?.text("SNG_ID", "ALB_ID", "ART_ID", "PLAYLIST_ID", "id")
             if (cursor.index > 0 && first != null &&
                 first == cursor.first
             ) {
                 throw DeezerFailure("LIBRARY_DID_NOT_ADVANCE")
             }
-            val next = if (hasMore(page, cursor.index, count)) {
+            val next = if (hasMore(page, cursor.index, count, pageSize)) {
                 if (count == 0 ||
                     cursor.index + count >= MAX_COLLECTION_SIZE
                 ) {
@@ -417,7 +411,7 @@ internal class DeezerCatalog(
 
     override suspend fun setSongVote(request: SongVoteRequest): Boolean {
         if (request.vote == TrackVote.DISLIKE || accounts.current() == null) return false
-        val songId = deezerId(request.trackId, TRACK_PREFIX) ?: return false
+        val songId = deezerTrackId(request.trackId, TRACK_PREFIX) ?: return false
         return accounts.withSession { session ->
             val response = session.call(
                 if (request.vote ==
@@ -435,7 +429,13 @@ internal class DeezerCatalog(
 
     override suspend fun resolve(request: MetadataRequest): MetadataContribution? {
         val id = trackId(request.identity) ?: return null
-        val data = http.publicGet("/track/$id")
+        val data = if (id.startsWith("-")) {
+            if (accounts.current() == null) return null
+            accounts.withSession { session ->
+                (session.call("song.getData", buildJsonObject { put("SNG_ID", id) }) as? JsonObject)?.entity()
+                    ?: throw DeezerFailure("TRACK_UNAVAILABLE")
+            }
+        } else http.publicGet("/track/$id")
         val track = DeezerModels.track(data) ?: return null
         return MetadataContribution(
             request.identity.copy(
@@ -488,6 +488,7 @@ internal class DeezerCatalog(
 
     override suspend fun recommendations(request: RecommendationRequest): RecommendationResult {
         val id = trackId(request.identity) ?: return RecommendationResult(emptyList())
+        if (id.startsWith("-")) return RecommendationResult(emptyList())
         require(request.continuation == null)
         val data = http.publicGet("/track/$id")
         val artistId =
@@ -531,13 +532,14 @@ internal class DeezerCatalog(
 
     private fun requireData(page: JsonObject): List<JsonObject> = (page["data"] as? JsonArray)?.objects() ?: throw DeezerFailure("INVALID_RESPONSE")
 
-    private fun hasMore(page: JsonObject, index: Int, count: Int): Boolean {
-        val total = page.text("total", "count", "TOTAL")?.toIntOrNull()
-        return if (total != null && total >= 0) index + count < total else count == PAGE_SIZE
+    private fun hasMore(page: JsonObject, index: Int, count: Int, pageSize: Int = PAGE_SIZE): Boolean {
+        val total = page.text("total", "TOTAL", "total_count")?.toIntOrNull()
+        return if (total != null && total >= 0) index + count < total else count >= pageSize
     }
 
     private companion object {
         const val PAGE_SIZE = 100
+        const val PROFILE_PAGE_SIZE = 40
         const val MAX_COLLECTION_SIZE = 50_000
         const val CURSOR_PREFIX = "deezer-library:"
         val CATEGORIES = listOf("tracks", "albums", "artists", "playlists")

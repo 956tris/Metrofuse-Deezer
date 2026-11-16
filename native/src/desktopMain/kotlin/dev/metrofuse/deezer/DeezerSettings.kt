@@ -52,7 +52,7 @@ internal class DeezerStreamingPreferences private constructor(
     override suspend fun set(key: String, value: JsonElement) {
         val options = when (key) {
             "streamingMode" -> setOf("ACCOUNT", "DZMEDIA")
-            "audioQuality" -> setOf("AUTO", "MP3_128", "MP3_320", "FLAC")
+            "audioQuality" -> setOf("AUTO", "MP3_128", "MP3_320", "FLAC", "FLAC_24")
             else -> return host.set(key, value)
         }
         require((value as? JsonPrimitive)?.contentOrNull in options)
@@ -77,7 +77,7 @@ internal class DeezerStreamingPreferences private constructor(
             }
             val choices = mapOf(
                 "streamingMode" to choice("streamingMode", setOf("ACCOUNT", "DZMEDIA"), "ACCOUNT"),
-                "audioQuality" to choice("audioQuality", setOf("AUTO", "MP3_128", "MP3_320", "FLAC"), "AUTO")
+                "audioQuality" to choice("audioQuality", setOf("AUTO", "MP3_128", "MP3_320", "FLAC", "FLAC_24"), "AUTO")
             )
             val preferences = DeezerStreamingPreferences(context.settings, context.storage, choices)
             context.scope.launch {
@@ -136,10 +136,12 @@ internal class DeezerSettingsScreen(
                     "AUTO" to strings.getValue("qualityAuto"),
                     "MP3_128" to strings.getValue("quality128"),
                     "MP3_320" to strings.getValue("quality320"),
-                    "FLAC" to strings.getValue("qualityFlac")
+                    "FLAC" to strings.getValue("qualityFlac"),
+                    "FLAC_24" to strings.getValue("qualityFlac24")
                 ),
                 !saving
             ) { select("audioQuality", it) }
+            Text(strings.getValue("qualityHint"), style = MaterialTheme.typography.bodySmall)
             if (failed) Text(strings.getValue("settingsError"), color = MaterialTheme.colorScheme.error)
         }
     }

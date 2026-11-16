@@ -124,7 +124,9 @@ jobs:
             cat > "$RUNNER_TEMP/deezer-release-notes.md" <<EOF
           Import deezer.jar on desktop or deezer.apk on Android through MetroFuse Plugins.
 
-          Includes Deezer browser sign-in, Home and library, account and dzmedia streaming, and streaming-source and quality dropdowns. Dzmedia accepts a hostname, base URL or full /get_url endpoint; its optional relay falls back to the Deezer CDN. The Windows sign-in browser is included in the desktop plugin.
+          Includes Deezer browser sign-in, Home and the paginated music library, account and dzmedia streaming, and streaming-source and quality dropdowns. Favorites and playlist calls use the verified gateway endpoints. Uploaded songs remain in the library and use the signed-in account's original MP3 stream. Best available quality tries FLAC_24, standard FLAC and MP3 according to the streaming account's rights; actual FLAC sample rate and bit depth are read from the decoded audio.
+
+          Dzmedia accepts a hostname, base URL or full /get_url endpoint; its optional relay falls back to the Deezer CDN. Live endpoint checks verified MP3 128, MP3 320 and 16-bit/44.1 kHz FLAC through the plugin decoder. Hi-res depends on the track and subscription. The Windows sign-in browser is included in the desktop plugin. See the repository's docs/endpoints.md for verification details.
 
           Built from https://github.com/$GITHUB_REPOSITORY/commit/$GITHUB_SHA by https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID. Requires MetroFuse API 1.1.0 and its matching plugin SDK. Device and account testing is left to the user.
           EOF

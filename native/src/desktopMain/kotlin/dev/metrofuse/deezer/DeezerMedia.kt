@@ -58,27 +58,26 @@ internal fun dzmediaServer(value: String): URI {
 }
 
 internal fun mediaFormats(request: AudioQuery, settings: StreamingSettings): List<String> {
-    if (request.quality.lossless) return listOf("FLAC")
+    if (request.quality.lossless) return if (settings.quality == "FLAC") listOf("FLAC") else listOf("FLAC_24", "FLAC")
     if (request.quality.preset == QualityPreset.LOW ||
         request.quality.maxBitrate?.let { it <= 128_000 } == true
     ) {
         return listOf("MP3_128")
     }
+    if (settings.quality == "MP3_128") return listOf("MP3_128")
+    if (request.quality.maxBitrate?.let { it <= 320_000 } == true) {
+        return if (request.quality.maxBitrate!! < 320_000) listOf("MP3_128") else listOf("MP3_320", "MP3_128")
+    }
     return when (settings.quality) {
+        "FLAC_24" -> listOf("FLAC_24", "FLAC", "MP3_320", "MP3_128")
+
         "FLAC" -> listOf("FLAC", "MP3_320", "MP3_128")
 
         "MP3_128" -> listOf("MP3_128")
 
         "MP3_320" -> listOf("MP3_320", "MP3_128")
 
-        "AUTO" -> if (request.quality.preferredCodecs.any {
-                it.equals("flac", true)
-            }
-        ) {
-            listOf("FLAC", "MP3_320", "MP3_128")
-        } else {
-            listOf("MP3_320", "MP3_128")
-        }
+        "AUTO" -> listOf("FLAC_24", "FLAC", "MP3_320", "MP3_128")
 
         else -> throw DeezerFailure("INVALID_QUALITY")
     }
@@ -93,8 +92,9 @@ internal class DeezerMedia(
     val server: URI? = null,
     val contentLength: Long? = null
 ) {
-    val mimeType: String get() = if (format == "FLAC") "audio/flac" else "audio/mpeg"
-    val codec: String get() = if (format == "FLAC") "flac" else "mp3"
+    val lossless: Boolean get() = format == "FLAC" || format == "FLAC_24"
+    val mimeType: String get() = if (lossless) "audio/flac" else "audio/mpeg"
+    val codec: String get() = if (lossless) "flac" else "mp3"
     val bitrate: Int? get() = when (format) {
         "MP3_128" -> 128_000
         "MP3_320" -> 320_000
@@ -116,7 +116,7 @@ internal object DeezerMediaParser {
             (root["data"] as? JsonArray)?.singleOrNull() as? JsonObject
                 ?: throw DeezerFailure("INVALID_MEDIA_RESPONSE")
         val candidates = data.list("media")
-        if (candidates.isEmpty()) throw DeezerFailure("MEDIA_UNAVAILABLE")
+        if (candidates.isEmpty()) throw mediaFailure(data)
         for (format in requested) {
             for (entry in candidates.filter { it.text("format") == format }) {
                 if (entry.text("media_type", "type") !=
@@ -173,6 +173,16 @@ internal object DeezerMediaParser {
             it < Long.MAX_VALUE / 1000
     }
         ?.let { if (it < 10_000_000_000) (it * 1000).toLong() else it.toLong() }
+
+    private fun mediaFailure(data: JsonObject): DeezerFailure {
+        val messages = data.list("errors").mapNotNull { it.text("message", "MESSAGE") }.joinToString(" ").lowercase()
+        return when {
+            "track token" in messages && ("expired" in messages || "decoding" in messages) -> DeezerFailure("TRACK_TOKEN_EXPIRED", retryable = true)
+            "expired" in messages -> DeezerFailure("MEDIA_EXPIRED", retryable = true)
+            "license token" in messages && "sufficient rights" in messages -> DeezerFailure("SUBSCRIPTION_REQUIRED")
+            else -> DeezerFailure("MEDIA_UNAVAILABLE")
+        }
+    }
 }
 
 internal class DeezerMediaResolver(
@@ -184,54 +194,68 @@ internal class DeezerMediaResolver(
         formats: List<String>,
         settings: StreamingSettings,
         forceRefresh: Boolean = false
-    ): DeezerMedia = when (settings.mode) {
-        "ACCOUNT" -> accounts.withSession { session ->
-            val track =
-                session.call(
-                    "song.getData",
-                    buildJsonObject {
-                        put("SNG_ID", id)
-                    }
-                ) as? JsonObject
-                    ?: throw DeezerFailure("INVALID_RESPONSE")
-            val token = track.text("TRACK_TOKEN") ?: throw DeezerFailure("TRACK_UNAVAILABLE")
+    ): DeezerMedia = when {
+        settings.mode == "ACCOUNT" || (settings.mode == "DZMEDIA" && id.startsWith("-")) -> accounts.withSession { session ->
+            val track = accountTrack(session, id)
             try {
-                DeezerMediaParser.parse(
-                    session.fullMedia(token, formats, forceRefresh),
-                    id,
-                    formats
-                )
+                accountMedia(session, track, id, formats, forceRefresh)
             } catch (failure: DeezerFailure) {
-                if (failure.code !in
-                    setOf("MEDIA_UNAVAILABLE", "MEDIA_EXPIRED", "ACCESS_DENIED")
-                ) {
-                    throw failure
+                val retryId = when (failure.code) {
+                    "MEDIA_EXPIRED", "TRACK_TOKEN_EXPIRED", "ACCESS_DENIED", "SUBSCRIPTION_REQUIRED" -> id
+                    "MEDIA_UNAVAILABLE", "TRACK_UNAVAILABLE" -> deezerTrackId(track.obj("FALLBACK").text("SNG_ID")) ?: throw failure
+                    else -> throw failure
                 }
-                val fallbackId = deezerId(track.obj("FALLBACK").text("SNG_ID"))
-                val fallback = fallbackId?.let {
-                    session.call(
-                        "song.getData",
-                        buildJsonObject {
-                            put("SNG_ID", it)
-                        }
-                    ) as? JsonObject
-                }
-                val retryId = fallbackId ?: id
-                val retryToken = fallback?.text("TRACK_TOKEN") ?: token
-                DeezerMediaParser.parse(
-                    session.fullMedia(retryToken, formats, forceRefresh = true),
-                    retryId,
-                    formats
-                )
+                accountMedia(session, accountTrack(session, retryId), retryId, formats, forceRefresh = true)
             }
         }
 
-        "DZMEDIA" -> {
-            if (id.toLong() > 4_294_967_295L) throw DeezerFailure("DZMEDIA_ID_UNSUPPORTED")
+        settings.mode == "DZMEDIA" -> {
             val server = dzmediaServer(settings.server)
+            try {
+                serverMedia(id, formats, server, settings.proxy)
+            } catch (failure: DeezerFailure) {
+                if (failure.code !in setOf("MEDIA_UNAVAILABLE", "TRACK_UNAVAILABLE", "NOT_FOUND")) throw failure
+                val fallbackId = fallbackTrackId(id) ?: throw failure
+                if (fallbackId.startsWith("-")) resolve(fallbackId, formats, settings, forceRefresh = true)
+                else serverMedia(fallbackId, formats, server, settings.proxy)
+            }
+        }
+
+        else -> throw DeezerFailure("INVALID_STREAMING_MODE")
+    }
+
+    private suspend fun accountTrack(session: DeezerSession, id: String): JsonObject =
+        (session.call("song.getData", buildJsonObject { put("SNG_ID", id) }) as? JsonObject)?.entity()
+            ?: throw DeezerFailure("TRACK_UNAVAILABLE")
+
+    private suspend fun accountMedia(
+        session: DeezerSession,
+        track: JsonObject,
+        requestedId: String,
+        formats: List<String>,
+        forceRefresh: Boolean
+    ): DeezerMedia {
+        val token = track.text("TRACK_TOKEN") ?: throw DeezerFailure("TRACK_UNAVAILABLE")
+        val actualId = deezerTrackId(track.text("SNG_ID")) ?: requestedId
+        val uploaded = actualId.startsWith("-") || track.text("FILESIZE_MP3_MISC")?.toLongOrNull()?.let { it > 0 } == true
+        val allowedFormats = if (uploaded) {
+            if (formats.none { it.startsWith("MP3_") }) throw DeezerFailure("QUALITY_UNAVAILABLE")
+            listOf("MP3_MISC")
+        } else formats
+        var renewLicense = forceRefresh
+        return negotiate(allowedFormats) { requested ->
+            val renew = renewLicense
+            renewLicense = false
+            DeezerMediaParser.parse(session.fullMedia(token, requested, renew), actualId, requested)
+        }
+    }
+
+    private suspend fun serverMedia(id: String, formats: List<String>, server: URI, proxy: Boolean): DeezerMedia {
+        if (id.toLong() !in 1..4_294_967_295L) throw DeezerFailure("DZMEDIA_ID_UNSUPPORTED")
+        return negotiate(formats) { requested ->
             val body = buildJsonObject {
                 put("ids", JsonArray(listOf(JsonPrimitive(id.toLong()))))
-                put("formats", JsonArray(formats.map(::JsonPrimitive)))
+                put("formats", JsonArray(requested.map(::JsonPrimitive)))
                 put("fast", false)
             }
             val root = http.post(server.toString() + "/get_url") {
@@ -239,9 +263,38 @@ internal class DeezerMediaResolver(
                 header("Content-Type", "application/json")
                 setBody(body.toString())
             }.jsonValue() as? JsonObject ?: throw DeezerFailure("INVALID_MEDIA_RESPONSE")
-            DeezerMediaParser.parse(root, id, formats, if (settings.proxy) server else null)
+            DeezerMediaParser.parse(root, id, requested, if (proxy) server else null)
         }
+    }
 
-        else -> throw DeezerFailure("INVALID_STREAMING_MODE")
+    private suspend fun negotiate(formats: List<String>, request: suspend (List<String>) -> DeezerMedia): DeezerMedia {
+        var remaining = formats.distinct()
+        if (remaining.isEmpty()) throw DeezerFailure("QUALITY_UNAVAILABLE")
+        while (true) {
+            try {
+                return request(remaining)
+            } catch (failure: DeezerFailure) {
+                val canFallback = failure.code in setOf("MEDIA_UNAVAILABLE", "QUALITY_UNAVAILABLE", "SUBSCRIPTION_REQUIRED", "FULL_TRACK_REQUIRED") ||
+                    (failure.code == "INVALID_REQUEST" && remaining.first() == "FLAC_24")
+                if (!canFallback || remaining.size == 1) throw failure
+                remaining = remaining.drop(1)
+            }
+        }
+    }
+
+    private suspend fun fallbackTrackId(id: String): String? {
+        return try {
+            val alternative = if (accounts.current() != null) {
+                accounts.withSession { session -> accountTrack(session, id).obj("FALLBACK").text("SNG_ID") }
+            } else {
+                val track = http.publicGet("/track/$id")
+                track.obj("alternative").text("id") ?: track.text("id")?.takeIf { it != id }
+            }
+            deezerTrackId(alternative)?.takeIf { it != id }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: DeezerFailure) {
+            null
+        }
     }
 }

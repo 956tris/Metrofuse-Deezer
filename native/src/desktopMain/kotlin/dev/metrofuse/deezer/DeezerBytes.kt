@@ -18,7 +18,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 internal const val STRIPE_BYTES = 2048
-internal const val MAX_MEDIA_BYTES = 256L * 1024 * 1024
+internal const val MAX_MEDIA_BYTES = 2L * 1024 * 1024 * 1024
+private const val MAX_BUFFER_CACHE_BYTES = 256L * 1024 * 1024
 
 internal class DeezerStripe(trackId: String, private val encrypted: Boolean = true) {
     private val cipher = Cipher.getInstance("Blowfish/CBC/NoPadding")
@@ -207,9 +208,67 @@ internal class DeezerCdn :
     }
 }
 
-internal data class MediaLocation(val uri: URI, val length: Long)
+internal data class FlacInfo(val sampleRate: Int, val bitDepth: Int, val channels: Int, val totalSamples: Long) {
+    val durationSeconds: Long? get() = totalSamples.takeIf { it > 0 }?.div(sampleRate)
+}
+
+internal data class MediaLocation(val uri: URI, val length: Long, val flac: FlacInfo? = null)
+
+internal fun parseFlacInfo(bytes: ByteArray): FlacInfo {
+    var offset = 0
+    if (bytes.size >= 10 && bytes.copyOfRange(0, 3).contentEquals(byteArrayOf(73, 68, 51))) {
+        val sizeBytes = bytes.copyOfRange(6, 10)
+        if (sizeBytes.any { it.toInt() and 0x80 != 0 }) throw DeezerFailure("INVALID_FLAC_HEADER")
+        offset = 10 + sizeBytes.fold(0) { size, byte -> (size shl 7) or byte.toInt() }
+        if (bytes[3].toInt() == 4 && bytes[5].toInt() and 0x10 != 0) offset += 10
+    }
+    if (offset < 0 || offset + 42 > bytes.size ||
+        !bytes.copyOfRange(offset, offset + 4).contentEquals(byteArrayOf(102, 76, 97, 67)) ||
+        bytes[offset + 4].toInt() and 0x7f != 0 ||
+        bytes[offset + 5].toInt() != 0 || bytes[offset + 6].toInt() != 0 || bytes[offset + 7].toInt() != 34
+    ) {
+        throw DeezerFailure("INVALID_FLAC_HEADER")
+    }
+    fun byte(index: Int) = bytes[offset + index].toInt() and 0xff
+    val sampleRate = (byte(18) shl 12) or (byte(19) shl 4) or (byte(20) shr 4)
+    val channels = ((byte(20) shr 1) and 7) + 1
+    val depth = ((byte(20) and 1) shl 4 or (byte(21) shr 4)) + 1
+    val samples = ((byte(21).toLong() and 15L) shl 32) or (byte(22).toLong() shl 24) or
+        (byte(23).toLong() shl 16) or (byte(24).toLong() shl 8) or byte(25).toLong()
+    if (sampleRate !in 8000..768000 || depth !in 8..32) throw DeezerFailure("INVALID_FLAC_HEADER")
+    return FlacInfo(sampleRate, depth, channels, samples)
+}
+
+private fun flacLocation(media: DeezerMedia, uri: URI, total: Long, opener: MediaOpener): MediaLocation {
+    val wanted = minOf(64L * 1024, total).toInt()
+    opener.open(media, uri, "GET", ByteRange(0, wanted - 1L)).use { response ->
+        if (response.status == 206) {
+            val content = Regex("bytes 0-([0-9]+)/([0-9]+)").matchEntire(response.contentRange.orEmpty())
+                ?: throw DeezerFailure("INVALID_CONTENT_RANGE")
+            if (content.groupValues[1].toLongOrNull()?.let { it < wanted - 1L || it >= total } != false ||
+                content.groupValues[2].toLongOrNull() != total
+            ) throw DeezerFailure("INVALID_CONTENT_RANGE")
+        } else if (response.status != 200 || response.length?.let { it != total } == true) {
+            throw DeezerFailure("MEDIA_UNREACHABLE", retryable = true)
+        }
+        val decoder = DeezerStripe(media.trackId, media.cipher == "BF_CBC_STRIPE")
+        val plain = ByteArray(wanted)
+        val block = ByteArray(STRIPE_BYTES)
+        response.body.use { input ->
+            var offset = 0
+            while (offset < wanted) {
+                val count = minOf(STRIPE_BYTES, wanted - offset)
+                if (readBlock(input, block, count) != count) throw DeezerFailure("MEDIA_TRUNCATED", retryable = true)
+                decoder.decode(block, count, offset.toLong()).copyInto(plain, offset)
+                offset += count
+            }
+        }
+        return MediaLocation(uri, total, parseFlacInfo(plain))
+    }
+}
 
 internal fun probeMedia(media: DeezerMedia, opener: MediaOpener): MediaLocation {
+    var lastFailure: DeezerFailure? = null
     for (uri in media.sources) {
         try {
             opener.open(media, uri, "HEAD", null).use { response ->
@@ -217,7 +276,7 @@ internal fun probeMedia(media: DeezerMedia, opener: MediaOpener): MediaLocation 
                 if (response.status in 200..299 && size != null &&
                     size in 1..MAX_MEDIA_BYTES && (media.contentLength == null || media.contentLength == size)
                 ) {
-                    return MediaLocation(uri, size)
+                    return if (media.lossless) flacLocation(media, uri, size, opener) else MediaLocation(uri, size)
                 }
             }
             opener.open(media, uri, "GET", ByteRange(0, 0)).use { response ->
@@ -225,14 +284,16 @@ internal fun probeMedia(media: DeezerMedia, opener: MediaOpener): MediaLocation 
                 if (response.status == 206 && size != null &&
                     size in 1..MAX_MEDIA_BYTES && (media.contentLength == null || media.contentLength == size)
                 ) {
-                    return MediaLocation(uri, size)
+                    return if (media.lossless) flacLocation(media, uri, size, opener) else MediaLocation(uri, size)
                 }
             }
+        } catch (failure: DeezerFailure) {
+            lastFailure = failure
         } catch (_: Exception) {
             // A resolver may return several CDNs. Try the next source without exposing signed URLs.
         }
     }
-    throw DeezerFailure("MEDIA_UNREACHABLE", retryable = true)
+    throw lastFailure ?: DeezerFailure("MEDIA_UNREACHABLE", retryable = true)
 }
 
 internal fun readBlock(input: InputStream, buffer: ByteArray, wanted: Int): Int {
@@ -277,9 +338,7 @@ internal class DeezerBuffer(private val opener: MediaOpener) : AutoCloseable {
         val file = withContext(Dispatchers.IO) {
             File.createTempFile(
                 "track-",
-                if (media.format ==
-                    "FLAC"
-                ) {
+                if (media.lossless) {
                     ".flac"
                 } else {
                     ".mp3"
@@ -327,7 +386,7 @@ internal class DeezerBuffer(private val opener: MediaOpener) : AutoCloseable {
                 if (closed || generation != revision) throw DeezerFailure("SESSION_CHANGED")
                 files[key] = file
                 while (files.size > 4 ||
-                    (files.values.sumOf(File::length) > MAX_MEDIA_BYTES && files.size > 1)
+                    (files.values.sumOf(File::length) > MAX_BUFFER_CACHE_BYTES && files.size > 1)
                 ) {
                     val entry = files.entries.first()
                     entry.value.delete()
