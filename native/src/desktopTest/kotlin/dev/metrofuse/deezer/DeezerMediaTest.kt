@@ -92,8 +92,8 @@ class DeezerMediaTest {
                     "AUTO"
                 )
             )
-            assertEquals("resolver.example", media.sources.single().host)
-            assertEquals("/api/deezer-media-proxy", media.sources.single().path)
+            assertEquals(listOf("resolver.example", "fixture.dzcdn.net"), media.sources.map { it.host })
+            assertEquals("/api/deezer-media-proxy", media.sources.first().path)
             assertFalse(media.toString().contains("token="))
         } finally {
             accounts.logout()

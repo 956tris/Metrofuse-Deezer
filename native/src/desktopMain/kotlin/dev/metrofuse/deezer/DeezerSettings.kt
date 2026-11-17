@@ -2,15 +2,14 @@ package dev.metrofuse.deezer
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenu
-import androidx.compose.material3.ExposedDropdownMenuAnchorType
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -19,7 +18,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import dev.metrofuse.api.NativeScreen
 import dev.metrofuse.api.PluginContext
@@ -119,7 +120,7 @@ internal class DeezerSettingsScreen(
             }
         }
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            StreamingDropdown(
+            StreamingChoice(
                 strings.getValue("streamingSource"),
                 current.mode,
                 linkedMapOf("ACCOUNT" to strings.getValue("accountSource"), "DZMEDIA" to strings.getValue("dzmediaSource")),
@@ -129,7 +130,7 @@ internal class DeezerSettingsScreen(
                 strings.getValue(if (current.mode == "DZMEDIA") "dzmediaStreamingHint" else "accountStreamingHint"),
                 style = MaterialTheme.typography.bodySmall
             )
-            StreamingDropdown(
+            StreamingChoice(
                 strings.getValue("audioQuality"),
                 current.quality,
                 linkedMapOf(
@@ -147,9 +148,8 @@ internal class DeezerSettingsScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun StreamingDropdown(
+private fun StreamingChoice(
     label: String,
     value: String,
     options: Map<String, String>,
@@ -157,26 +157,38 @@ private fun StreamingDropdown(
     select: (String) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { if (enabled) expanded = it }
-    ) {
-        OutlinedTextField(
-            value = options[value].orEmpty(),
-            onValueChange = {},
-            readOnly = true,
+    Column(Modifier.fillMaxWidth()) {
+        Text(label, style = MaterialTheme.typography.labelMedium)
+        OutlinedButton(
+            onClick = { expanded = !expanded },
+            modifier = Modifier.fillMaxWidth(),
             enabled = enabled,
-            singleLine = true,
-            label = { Text(label) },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-            modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable).fillMaxWidth()
-        )
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            options.forEach { (key, title) ->
-                DropdownMenuItem(text = { Text(title) }, onClick = {
-                    expanded = false
-                    select(key)
-                })
+        ) {
+            Text(options[value].orEmpty(), Modifier.weight(1f))
+            Text(if (expanded) "▴" else "▾")
+        }
+        // This plugin's desktop bytecode also ships in the Android APK. A platform popup
+        // would link its desktop-only implementation when the control opens on Android.
+        if (expanded) {
+            Column(Modifier.selectableGroup()) {
+                options.forEach { (key, title) ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).selectable(
+                            selected = key == value,
+                            enabled = enabled,
+                            role = Role.RadioButton,
+                            onClick = {
+                                expanded = false
+                                if (key != value) select(key)
+                            },
+                        ),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = key == value, onClick = null, enabled = enabled)
+                        Text(title)
+                    }
+                }
             }
         }
     }

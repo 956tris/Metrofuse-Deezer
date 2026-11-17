@@ -15,7 +15,6 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.json.JsonArray
 
 class DeezerCatalogTest {
     @Test
@@ -85,7 +84,7 @@ class DeezerCatalogTest {
     }
 
     @Test
-    fun libraryPaginatesFavoritesAndIncludesAlbumsArtistsAndPrivatePlaylists() = runBlocking {
+    fun libraryPaginatesFavoritesAndIncludesAlbumsArtistsAndPrivatePlaylists() = runBlocking<Unit> {
         val calls = mutableListOf<Pair<String, Int>>()
         val accounts = DeezerAccounts(createClient = { arl ->
             mockHttp(arl) { request ->
@@ -95,19 +94,11 @@ class DeezerCatalogTest {
                 val index = body.text("start")?.toInt() ?: 0
                 calls += method to index
                 when (method) {
-                    "song.getFavoriteIds" -> gatewayResult(
+                    "favorite_song.getList" -> gatewayResult(
                         """{"count":101,"data":[${(if (index == 0) 1..100 else 101..101).joinToString(
                             ","
                         ) {
-                            "{\"SNG_ID\":\"$it\"}"
-                        }}]}"""
-                    )
-
-                    "song.getListData" -> gatewayResult(
-                        """{"data":[${(body["SNG_IDS"] as JsonArray).joinToString(
-                            ","
-                        ) {
-                            "{\"SNG_ID\":$it,\"SNG_TITLE\":\"Favorite\",\"ART_NAME\":\"Artist\"}"
+                            "{\"SNG_ID\":\"$it\",\"SNG_TITLE\":\"Favorite\",\"ART_NAME\":\"Artist\"}"
                         }}]}"""
                     )
 
@@ -148,7 +139,7 @@ class DeezerCatalogTest {
             assertEquals(1, items.count { it.artist != null })
             assertEquals(1, items.count { it.playlist != null })
             assertTrue(items.mapNotNull { it.track }.all { it.extras["likeStatus"] == "LIKE" })
-            assertTrue("song.getFavoriteIds" to 100 in calls)
+            assertTrue("favorite_song.getList" to 100 in calls)
             val liked = catalog.library(LibraryRequest("fr", "FR", likedSongsOnly = true))
             assertNotNull(liked.continuation)
             assertFailsWith<IllegalArgumentException> {
@@ -196,7 +187,7 @@ class DeezerCatalogTest {
     }
 
     @Test
-    fun publicHomeUsesTheHostLanguageAndAlbumPagingRejectsAnotherOrigin() = runBlocking {
+    fun publicHomeUsesTheHostLanguageAndAlbumPagingRejectsAnotherOrigin() = runBlocking<Unit> {
         val http = mockHttp { request ->
             when (request.url.encodedPath) {
                 "/chart/0" -> {

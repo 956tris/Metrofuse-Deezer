@@ -103,7 +103,7 @@ class DeezerSessionTest {
     }
 
     @Test
-    fun credentialsAndSessionDescriptionsDoNotExposeSecrets() = runBlocking {
+    fun credentialsAndSessionDescriptionsDoNotExposeSecrets() = runBlocking<Unit> {
         val accounts =
             DeezerAccounts(createClient = { arl ->
                 mockHttp(arl) { userData() }

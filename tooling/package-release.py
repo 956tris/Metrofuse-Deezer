@@ -32,6 +32,14 @@ for filename in ("deezer.jar", "deezer.apk"):
             browser = archive.getinfo("assets/windows/deezer-browser.exe")
             if browser.file_size < 1024 * 1024:
                 raise SystemExit("Desktop sign-in requires the packaged Windows browser")
+        else:
+            dex_files = [name for name in archive.namelist() if re.fullmatch(r"classes(?:\d+)?\.dex", name)]
+            if not dex_files:
+                raise SystemExit("Android plugin is missing its DEX code")
+            for name in dex_files:
+                bytecode = archive.read(name)
+                if b"_skikoKt;" in bytecode or b"Lorg/jetbrains/skiko/" in bytecode:
+                    raise SystemExit(f"Android plugin references desktop-only Compose code in {name}")
         if archive.testzip() is not None:
             raise SystemExit(f"Invalid archive: {filename}")
     target = output / filename
