@@ -3,7 +3,6 @@ package dev.metrofuse.deezer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -23,6 +22,7 @@ import dev.metrofuse.api.LoginUiContext
 import dev.metrofuse.api.NativeLoginUi
 import dev.metrofuse.api.PluginResources
 import dev.metrofuse.api.WebLoginRequest
+import dev.metrofuse.sdk.PluginAlertDialog
 import dev.metrofuse.sdk.WebViewLabels
 import dev.metrofuse.sdk.WebViewLoginScreen
 import dev.metrofuse.sdk.WebViewLoginUi
@@ -95,7 +95,7 @@ internal class DeezerLoginScreen(
                 running = false
             }
         }
-        AlertDialog(
+        PluginAlertDialog(
             onDismissRequest = context.dismiss,
             title = { Text(strings.getValue("title")) },
             text = {

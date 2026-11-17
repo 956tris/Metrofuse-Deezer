@@ -19,11 +19,11 @@ The library covers MetroFuse's four music types. Podcast shows and episode bookm
 
 Download `deezer.jar` for desktop or `deezer.apk` for Android from [Releases](https://github.com/956tris/Metrofuse-Deezer/releases/latest). Import it through MetroFuse's Plugins screen; the APK is a plugin container, not a separate Android application. Enable Deezer, select its Home source and use the account button to sign in directly on Deezer's website. Windows sign-in opens the browser bundled in the plugin and requires Microsoft Edge WebView2. A session-token option is available if the browser cannot open; it uses the same account verification and encrypted host credential store.
 
-Use a MetroFuse host with API 1.1.0, its plugin SDK and the native ABI `kotlin-2.4.21_compose-1.13.0-beta02_api-1.1.0`. The host supplies WebView sign-in, Kotlin, Compose, coroutines, serialization and Ktor. Accepted sessions use the host's encrypted credential store where supported. The plugin does not store cookies or license tokens in ordinary settings or files.
+Use [MetroFuse UI SDK preview 003](https://github.com/956tris/MetroFuse/releases/tag/v10.0.0-ui-sdk-preview-003) or a compatible host with API 1.1.0, the platform dialog bridge, and the native ABI `kotlin-2.4.21_compose-1.13.0-beta02_api-1.1.0`. The host supplies WebView sign-in, Kotlin, Compose, coroutines, serialization and Ktor. Accepted sessions use the host's encrypted credential store where supported. The plugin does not store cookies or license tokens in ordinary settings or files.
 
 ## Streaming settings
 
-Open Deezer's settings in the Plugins screen and choose **Deezer account** or **Dzmedia** from the **Streaming source** dropdown. Quality also has a dropdown. These selections are saved in the plugin's own storage. After upgrading from 1.0.0, select your source and quality once; the saved server URL and switches are retained.
+Open Deezer's settings in the Plugins screen and tap **Streaming source** to show the **Deezer account** and **Dzmedia** options. **Preferred Deezer quality** opens the same kind of picker. These selections are saved in the plugin's own storage. After upgrading from 1.0.0, select your source and quality once. The saved server URL and switches are retained.
 
 **Deezer account** is the default streaming source. Sign in to Deezer and use a subscription that permits the requested quality. The plugin obtains a track token and the account's license token and requests `FULL` media from Deezer. Playback errors are returned when the service does not grant full-track access.
 
