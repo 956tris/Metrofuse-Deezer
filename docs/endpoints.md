@@ -76,7 +76,7 @@ The configurable server is normalized from a hostname, base URL or complete `/ge
 
 No user cookie or account license is sent to dzmedia. The server's configured streaming account determines the granted formats. The response contract uses `data[].media[]`, `media_type`, `format`, `cipher.type`, `sources[].url`, `exp` and optional `filesize`. Expiry values are normalized to milliseconds. Returned direct media must use HTTPS on `dzcdn.net` or its subdomains.
 
-Live checks of `https://lufts-dzmedia.fly.dev/get_url`, followed by the compiled plugin's actual parser, CDN opener and stripe decoder, produced:
+Historical resolver-contract checks through the compiled plugin's actual parser, CDN opener and stripe decoder produced:
 
 | Requested formats | Selected format | Media bytes | Decoded FLAC properties |
 | --- | --- | ---: | --- |
@@ -86,6 +86,6 @@ Live checks of `https://lufts-dzmedia.fly.dev/get_url`, followed by the compiled
 | `FLAC_24`, `FLAC`, relay enabled | `FLAC`, direct CDN fallback | 25,275,843 | 44,100 Hz, 16-bit, stereo |
 | `FLAC_24` only | No media for the sampled track | — | — |
 
-The deployment's `/deezer-media-proxy` returns 404. When enabled, relay probing successfully falls back to direct CDN sources. CDN HEAD and ranged GET requests succeeded. For lossless media the plugin decrypts a bounded header range and reads FLAC STREAMINFO, exposing actual sample rate, bit depth, channel count and duration. It does not claim 24-bit audio just because `FLAC_24` was requested.
+The current default Worker, `https://metrofuse-dzmedia.amax69420lol.workers.dev/get_url`, returned MP3 128 for the sampled track; its configured account's streaming rights determine the available formats. Its `/deezer-media-proxy` route returns 404, so relay mode falls back to direct CDN sources. For lossless media the plugin decrypts a bounded header range and reads FLAC STREAMINFO, exposing actual sample rate, bit depth, channel count and duration. It does not claim 24-bit audio just because `FLAC_24` was requested.
 
 Desktop playback supplies decoded byte ranges through the plugin's private loopback endpoint; Android supplies a fully decoded temporary file. Both packages were built without running the test suite or building the local host. Browser login, private library contents, subscription access, actual 24-bit availability and device playback remain for the user's device/account verification.
