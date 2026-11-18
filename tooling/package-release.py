@@ -29,9 +29,8 @@ for filename in ("deezer.jar", "deezer.apk"):
         if packaged["id"] != manifest["id"] or packaged["version"] != version:
             raise SystemExit(f"Rebuild the outdated {filename}")
         if source.suffix == ".jar":
-            browser = archive.getinfo("assets/windows/deezer-browser.exe")
-            if browser.file_size < 1024 * 1024:
-                raise SystemExit("Desktop sign-in requires the packaged Windows browser")
+            if any(name.endswith(".exe") for name in archive.namelist()):
+                raise SystemExit("Browser must be supplied by the host SDK")
         else:
             dex_files = [name for name in archive.namelist() if re.fullmatch(r"classes(?:\d+)?\.dex", name)]
             if not dex_files:

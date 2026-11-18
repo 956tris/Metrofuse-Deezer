@@ -1,5 +1,8 @@
 package dev.metrofuse.deezer
 
+import dev.metrofuse.sdk.acceptsBrowserNavigation
+import dev.metrofuse.sdk.captureBrowserCookies
+import dev.metrofuse.sdk.validateBrowserRequest
 import dev.metrofuse.api.LoginCredentials
 import io.ktor.http.HttpHeaders
 import kotlin.test.Test
@@ -16,6 +19,23 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 
 class DeezerSessionTest {
+    @Test
+    fun sdkLoginCapturesOnlyAnAuthenticatedServiceSession() {
+        val plugin: dev.metrofuse.api.LoginPlugin = DeezerPlugin()
+        assertTrue(plugin is dev.metrofuse.api.NativeLoginUi)
+        assertFalse(plugin is dev.metrofuse.api.WebLoginPlugin)
+        val request = (plugin as DeezerPlugin).browserRequest()
+        request.validateBrowserRequest()
+        assertNull(request.completionPath)
+        assertTrue(request.acceptsBrowserNavigation("https://www.deezer.com/en/"))
+        assertTrue(request.acceptsBrowserNavigation("https://account.apple.com/"))
+        assertTrue(request.acceptsBrowserNavigation("https://m.facebook.com/login.php"))
+        assertFalse(request.acceptsBrowserNavigation("https://www.deezer.com.evil.example/"))
+        assertFalse(request.acceptsBrowserNavigation("http://www.deezer.com/"))
+        assertNull(request.captureBrowserCookies("sid=unfinished-login"))
+        assertEquals(mapOf("cookie" to "arl=$TEST_ARL"), request.captureBrowserCookies("arl=$TEST_ARL"))
+    }
+
     @Test
     fun validatesCapturedArlAndRejectsHeaderInjection() {
         assertEquals(TEST_ARL, DeezerAccounts.extractArl("sid=fixture; arl=$TEST_ARL"))

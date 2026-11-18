@@ -5,12 +5,12 @@ import dev.metrofuse.api.HomePlugin
 import dev.metrofuse.api.HomeRequest
 import dev.metrofuse.api.LoginCredentials
 import dev.metrofuse.api.LoginField
+import dev.metrofuse.api.LoginPlugin
 import dev.metrofuse.api.LoginRequest
 import dev.metrofuse.api.LoginUiContext
 import dev.metrofuse.api.NativeLoginUi
 import dev.metrofuse.api.NativePlugin
 import dev.metrofuse.api.PluginContext
-import dev.metrofuse.api.WebLoginPlugin
 import dev.metrofuse.api.WebLoginRequest
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.Job
@@ -22,7 +22,7 @@ import kotlinx.serialization.json.contentOrNull
 
 class DeezerPlugin :
     NativePlugin,
-    WebLoginPlugin,
+    LoginPlugin,
     NativeLoginUi,
     HomePlugin {
     private var http: HttpClient? = null
@@ -37,8 +37,6 @@ class DeezerPlugin :
     override val loginState get() = accounts.loginState
 
     override suspend fun loginRequest() = request
-
-    override suspend fun webLoginRequest() = browserRequest()
 
     override suspend fun login(credentials: LoginCredentials) = accounts.login(credentials)
 
@@ -64,7 +62,7 @@ class DeezerPlugin :
                 listOf(LoginField("cookie", strings.getValue("session"))),
                 strings.getValue("instructions")
             )
-        accountUi = DeezerLoginScreen(browserRequest(), strings, context.resources)
+        accountUi = DeezerLoginScreen(browserRequest(), strings)
         val streamingSettings = DeezerStreamingPreferences.create(context)
         context.registerUi("settings.deezer", DeezerSettingsScreen(streamingSettings, strings))
         val client = createDeezerHttp().also { http = it }
@@ -125,7 +123,7 @@ class DeezerPlugin :
         requiredCookies = listOf("arl"),
         allowedHosts = listOf(
             "www.deezer.com", "deezer.com", "auth.deezer.com", "connect.deezer.com", "consent.deezer.com",
-            "accounts.google.com", "www.google.com", "facebook.com", "www.facebook.com", "appleid.apple.com"
+            "accounts.google.com", "www.google.com", "facebook.com", "www.facebook.com", "appleid.apple.com", "account.apple.com", "m.facebook.com"
         )
     )
 }
